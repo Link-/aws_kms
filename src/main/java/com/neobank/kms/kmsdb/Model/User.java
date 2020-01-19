@@ -11,9 +11,11 @@ public class User {
     private Long id;
     @Column(unique = true)
     private String customerId;
+    @Column(columnDefinition = "CLOB")
     private String encryptedRegistrationCode;
     private String cmkAlias;
     private String cmkId;
+    @Column(columnDefinition = "CLOB")
     private String encryptionKey;
 
     protected User() {}

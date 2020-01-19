@@ -6,21 +6,24 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.util.Pair;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider;
+import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.kms.KmsClient;
+import software.amazon.awssdk.services.kms.model.DecryptRequest;
+import software.amazon.awssdk.services.kms.model.DecryptResponse;
+import software.amazon.awssdk.services.kms.model.EncryptRequest;
+import software.amazon.awssdk.services.kms.model.EncryptResponse;
 
 import javax.crypto.*;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.util.ArrayList;
 import java.util.Base64;
-import java.util.List;
-import java.util.Random;
 
 @Service
 public class KmsService {
@@ -44,10 +47,6 @@ public class KmsService {
                 .build();
     }
 
-    public String testServiceCall() {
-        return kmsClient.listKeys().toString();
-    }
-
     /**
      *
      * @param customerId
@@ -64,8 +63,8 @@ public class KmsService {
         Pair<String, String> keyRegistrationCodePair = encryptRegistrationCode(registrationCode);
         User createdUser = users.saveAndFlush(new User(customerId,
                                 keyRegistrationCodePair.getSecond(),
-                                "placeholder",
-                                "placeholder",
+                                cmkAlias,
+                                cmkArn,
                                 keyRegistrationCodePair.getFirst()));
         return createdUser;
     }
@@ -83,12 +82,44 @@ public class KmsService {
      */
     public User getUser(String customerId) throws NoSuchPaddingException, InvalidKeyException, NoSuchAlgorithmException, IllegalBlockSizeException, BadPaddingException, InvalidAlgorithmParameterException {
         User fetchedUser = users.findByCustomerId(customerId).get(0);
+
         return new User(fetchedUser.getCustomerId(),
                 decryptRegistrationCode(fetchedUser.getEncryptionKey(),
                         fetchedUser.getEncryptedRegistrationCode()),
                 fetchedUser.getCmkAlias(),
                 fetchedUser.getCmkId(),
                 fetchedUser.getEncryptionKey());
+    }
+
+    /**
+     *
+     * @param key
+     * @return
+     */
+    private String encryptAESKey(SecretKey key) {
+        SdkBytes keyBytesArray = SdkBytes.fromByteArray(key.getEncoded());
+        EncryptRequest request = EncryptRequest.builder()
+                .keyId(cmkArn)
+                .plaintext(keyBytesArray)
+                .encryptionAlgorithm("RSAES_OAEP_SHA_256")
+                .build();
+        EncryptResponse response = kmsClient.encrypt(request);
+        return Base64.getEncoder().encodeToString(response.ciphertextBlob().asByteArray());
+    }
+
+    /**
+     *
+     * @param key
+     * @return
+     */
+    private byte[] decryptAESKey(String key) {
+        SdkBytes encryptedKey = SdkBytes.fromByteArray(Base64.getDecoder().decode(key));
+        DecryptRequest request = DecryptRequest.builder()
+                .keyId(cmkArn)
+                .encryptionAlgorithm("RSAES_OAEP_SHA_256")
+                .ciphertextBlob(encryptedKey).build();
+        DecryptResponse response = kmsClient.decrypt(request);
+        return response.plaintext().asByteArray();
     }
 
     /**
@@ -120,7 +151,7 @@ public class KmsService {
         byteBuffer.put(cipherText);
         byte[] cipherMessage = byteBuffer.array();
 
-        return Pair.of(Base64.getEncoder().encodeToString(secretKey.getEncoded()),
+        return Pair.of(encryptAESKey(secretKey),
                 Base64.getEncoder().encodeToString(cipherMessage));
     }
 
@@ -135,7 +166,7 @@ public class KmsService {
      * @throws IllegalBlockSizeException
      */
     private String decryptRegistrationCode(String key, String encryptedRegistrationCode) throws NoSuchPaddingException, NoSuchAlgorithmException, BadPaddingException, IllegalBlockSizeException, InvalidAlgorithmParameterException, InvalidKeyException {
-        byte[] secretKey = Base64.getDecoder().decode(key);
+        byte[] secretKey = decryptAESKey(key);
         ByteBuffer byteBuffer = ByteBuffer.wrap(Base64.getDecoder().decode(encryptedRegistrationCode));
         int ivLength = byteBuffer.getInt();
 
@@ -158,7 +189,7 @@ public class KmsService {
     }
 
     /**
-     * Generates a random 128 bit key
+     * Generates a random (16 bytes) 128 bit key
      *
      * @return a 128 bit key
      */
