@@ -1,0 +1,94 @@
+{
+	"info": {
+		"_postman_id": "f184fce1-3fea-4201-9b50-e90b9f3e7d59",
+		"name": "KMS_POC",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "GET /customer",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Content-Type",
+						"name": "Content-Type",
+						"value": "application/x-www-form-urlencoded",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "customerId",
+							"value": "1111112",
+							"type": "text"
+						},
+						{
+							"key": "registrationCode",
+							"value": "7654321",
+							"type": "text",
+							"disabled": true
+						}
+					]
+				},
+				"url": {
+					"raw": "localhost:8080/customer",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"customer"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "POST /customer",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"name": "Content-Type",
+						"type": "text",
+						"value": "application/x-www-form-urlencoded"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "customerId",
+							"value": "1111112",
+							"type": "text"
+						},
+						{
+							"key": "registrationCode",
+							"value": "e54c7f888147b5596e721019bc023eb073e108a01b4d3589ce94c92282b0c17a",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "localhost:8080/customer",
+					"host": [
+						"localhost"
+					],
+					"port": "8080",
+					"path": [
+						"customer"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"protocolProfileBehavior": {}
+}
