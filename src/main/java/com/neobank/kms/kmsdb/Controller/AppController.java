@@ -27,16 +27,10 @@ public class AppController {
     @Autowired
     private KmsService kmsService;
 
-    @GetMapping("/index")
-    public ResponseEntity<Object> index() {
-        return ResponseEntity.ok().body(kmsService.testServiceCall());
-    }
-
     @PostMapping("/customer")
     public ResponseEntity<Object> addUser(
             @RequestParam(name="customerId") String customerId,
-            @RequestParam(name="registrationCode") String registrationCode
-    ) throws BadPaddingException, InvalidKeyException, NoSuchAlgorithmException, IllegalBlockSizeException, NoSuchPaddingException, InvalidAlgorithmParameterException {
+            @RequestParam(name="registrationCode") String registrationCode) throws BadPaddingException, InvalidKeyException, NoSuchAlgorithmException, IllegalBlockSizeException, NoSuchPaddingException, InvalidAlgorithmParameterException {
         return ResponseEntity.ok().body(kmsService.createUser(customerId, registrationCode));
     }
 

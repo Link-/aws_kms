@@ -2,9 +2,9 @@ package com.neobank.kms.kmsdb.Service;
 
 import com.neobank.kms.kmsdb.Model.User;
 import com.neobank.kms.kmsdb.Repository.UserRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.util.Pair;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.regions.Region;
@@ -14,16 +14,15 @@ import software.amazon.awssdk.services.kms.model.DecryptResponse;
 import software.amazon.awssdk.services.kms.model.EncryptRequest;
 import software.amazon.awssdk.services.kms.model.EncryptResponse;
 
+import java.util.Base64;
+import java.nio.ByteBuffer;
+import java.security.SecureRandom;
 import javax.crypto.*;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
-import java.util.Base64;
+import java.security.InvalidAlgorithmParameterException;
 
 @Service
 public class KmsService {
@@ -31,6 +30,7 @@ public class KmsService {
     private final static String cmkArn = "arn:aws:kms:eu-west-1:730880032795:key/95ae5ce4-862f-49eb-b103-05d06cd0b426";
     private final static String cmkAlias = "tw_poc_cmk";
     private final static Region region = Region.EU_WEST_1;
+    private final static String profileName = "personal";
     private KmsClient kmsClient;
     @Autowired
     private UserRepository users;
@@ -38,7 +38,7 @@ public class KmsService {
     public KmsService() {
         ProfileCredentialsProvider credentialsProvider = ProfileCredentialsProvider
                 .builder()
-                .profileName("personal")
+                .profileName(profileName)
                 .build();
 
         kmsClient = KmsClient.builder()
@@ -48,10 +48,12 @@ public class KmsService {
     }
 
     /**
+     * Takes a customerId and registrationCode and creates a new record in the database.
+     * The registrationCode will go through the entire encryption mechanism
      *
      * @param customerId
      * @param registrationCode
-     * @return
+     * @return User
      * @throws IllegalBlockSizeException
      * @throws BadPaddingException
      * @throws NoSuchAlgorithmException
@@ -70,9 +72,10 @@ public class KmsService {
     }
 
     /**
+     * Fetch a record from the DB with a customerId and decrypt the registration code
      *
      * @param customerId
-     * @return
+     * @return User
      * @throws NoSuchPaddingException
      * @throws InvalidKeyException
      * @throws NoSuchAlgorithmException
@@ -82,7 +85,6 @@ public class KmsService {
      */
     public User getUser(String customerId) throws NoSuchPaddingException, InvalidKeyException, NoSuchAlgorithmException, IllegalBlockSizeException, BadPaddingException, InvalidAlgorithmParameterException {
         User fetchedUser = users.findByCustomerId(customerId).get(0);
-
         return new User(fetchedUser.getCustomerId(),
                 decryptRegistrationCode(fetchedUser.getEncryptionKey(),
                         fetchedUser.getEncryptedRegistrationCode()),
@@ -92,9 +94,13 @@ public class KmsService {
     }
 
     /**
+     * Takes a Secret Key that was used in the first encryption step and
+     * encrypts that key using the CMK stored in KMS
+     *
+     * This key will be sent to KMS. The CMK never leaves the HSM.
      *
      * @param key
-     * @return
+     * @return Base64 encoded SecretKey
      */
     private String encryptAESKey(SecretKey key) {
         SdkBytes keyBytesArray = SdkBytes.fromByteArray(key.getEncoded());
@@ -108,9 +114,11 @@ public class KmsService {
     }
 
     /**
+     * Takes a Base64 encoded encrypted key and attemps to decrypt it using the CMK
+     * stored in KMS.
      *
      * @param key
-     * @return
+     * @return Byte array of the decrypted Secret Key
      */
     private byte[] decryptAESKey(String key) {
         SdkBytes encryptedKey = SdkBytes.fromByteArray(Base64.getDecoder().decode(key));
@@ -123,9 +131,19 @@ public class KmsService {
     }
 
     /**
+     * Uses a randomized IV (acts like a salt) and a randomized Secret Key to encrypt
+     * the registrationCode with AES-GCM.
+     *
+     * It will combine the IV and encrypted registrationCode into a byte array and then
+     * encode that byte array to Base64 for storage in the database.
+     *
+     * This method will also encrypt the Secret Key used in encrypting the registrationCode
+     * with the CMK (Customer Master Key) stored in KMS.
+     *
+     * It will return a tuple of the encrypted secret key and encrypted registrationCode.
      *
      * @param registrationCode
-     * @return
+     * @return Pair of encrypted secret key and encrypted registrationCode
      * @throws NoSuchPaddingException
      * @throws NoSuchAlgorithmException
      * @throws BadPaddingException
@@ -138,54 +156,72 @@ public class KmsService {
         SecretKey secretKey = getNextKey();
         byte[] registrationCodeArray = registrationCode.getBytes();
 
+        // Initialize the cipher and encrypt the registrationCode
         final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         GCMParameterSpec parameterSpec = new GCMParameterSpec(128, IV);
         cipher.init(Cipher.ENCRYPT_MODE,
                 secretKey,
                 parameterSpec);
-        byte[] cipherText = cipher.doFinal(registrationCodeArray);
+        byte[] encryptedRegistrationCode = cipher.doFinal(registrationCodeArray);
 
-        ByteBuffer byteBuffer = ByteBuffer.allocate(4 + IV.length + cipherText.length);
+        // Combine the encryptedRegistrationCode with the IV so that they're both
+        // stored in the database
+        ByteBuffer byteBuffer = ByteBuffer.allocate(4 + IV.length + encryptedRegistrationCode.length);
         byteBuffer.putInt(IV.length);
         byteBuffer.put(IV);
-        byteBuffer.put(cipherText);
-        byte[] cipherMessage = byteBuffer.array();
+        byteBuffer.put(encryptedRegistrationCode);
+        byte[] encryptedPayload = byteBuffer.array();
 
+        // Encrypt the secret key with the CMK stored in KMS and return the result
+        // in a tuple along with the encryptedRegistrationCode and IV
         return Pair.of(encryptAESKey(secretKey),
-                Base64.getEncoder().encodeToString(cipherMessage));
+                Base64.getEncoder().encodeToString(encryptedPayload));
     }
 
     /**
+     * This method takes a Secret Key (key) stored in the database along with an
+     * encryptedRegistrationCode, it will use the CMK (Customer Master Key) stored in KMS
+     * to first decrypt the secret key.
+     *
+     * The decrypted secret key will be used to decrypt the encryptedRegistrationCode.
+     *
+     * Once that is achieve this method will return the decrypted registrationCode as a
+     * String.
      *
      * @param key
      * @param encryptedRegistrationCode
-     * @return
+     * @return Decrypted registrationCode in plaintext
      * @throws NoSuchPaddingException
      * @throws NoSuchAlgorithmException
      * @throws BadPaddingException
      * @throws IllegalBlockSizeException
      */
     private String decryptRegistrationCode(String key, String encryptedRegistrationCode) throws NoSuchPaddingException, NoSuchAlgorithmException, BadPaddingException, IllegalBlockSizeException, InvalidAlgorithmParameterException, InvalidKeyException {
-        byte[] secretKey = decryptAESKey(key);
+        byte[] decryptedSecretKey = decryptAESKey(key);
+        // Extract the IV and encryptedRegistrationCode from the combined payload that was stored
+        // in the DB
         ByteBuffer byteBuffer = ByteBuffer.wrap(Base64.getDecoder().decode(encryptedRegistrationCode));
+
+        // First 4 bytes are the IV length value
         int ivLength = byteBuffer.getInt();
 
         if (ivLength < 12 || ivLength >= 16) { // check input parameter
             throw new IllegalArgumentException("invalid iv length");
         }
-
+        // The IV is extracted based on the length value that was extracted previously
         byte[] IV = new byte[ivLength];
         byteBuffer.get(IV);
+        // The encrypted registration code is what remains
         byte[] cipherText = new byte[byteBuffer.remaining()];
         byteBuffer.get(cipherText);
 
         final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.DECRYPT_MODE,
-                new SecretKeySpec(secretKey, "AES"),
+                new SecretKeySpec(decryptedSecretKey, "AES"),
                 new GCMParameterSpec(128, IV));
-        byte[] plainText = cipher.doFinal(cipherText);
+        byte[] registrationCode = cipher.doFinal(cipherText);
 
-        return new String(plainText);
+        return new String(registrationCode);
     }
 
     /**
