@@ -1,8 +1,8 @@
 package com.neobank.kms.kmsdb.Controller;
 
-import com.neobank.kms.kmsdb.Model.User;
-import com.neobank.kms.kmsdb.Repository.UserRepository;
 import com.neobank.kms.kmsdb.Service.KmsService;
+import org.identityconnectors.common.security.GuardedString;
+import org.identityconnectors.common.security.SecurityUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,11 +13,9 @@ import org.springframework.web.bind.annotation.RestController;
 import javax.crypto.BadPaddingException;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
-import javax.xml.ws.Response;
 import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 @RestController
@@ -31,7 +29,13 @@ public class AppController {
     public ResponseEntity<Object> addUser(
             @RequestParam(name="customerId") String customerId,
             @RequestParam(name="registrationCode") String registrationCode) throws BadPaddingException, InvalidKeyException, NoSuchAlgorithmException, IllegalBlockSizeException, NoSuchPaddingException, InvalidAlgorithmParameterException {
-        return ResponseEntity.ok().body(kmsService.createUser(customerId, registrationCode));
+        char[] registrationCodeArray = registrationCode.toCharArray();
+        GuardedString guardedRegistrationCode = new GuardedString(registrationCodeArray);
+
+        // Cleanup
+        SecurityUtil.clear(registrationCodeArray);
+
+        return ResponseEntity.ok().body(kmsService.createUser(customerId, guardedRegistrationCode));
     }
 
     @GetMapping("/customer")
