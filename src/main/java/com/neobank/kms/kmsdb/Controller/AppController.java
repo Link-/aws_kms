@@ -30,6 +30,11 @@ public class AppController {
             @RequestParam(name="customerId") String customerId,
             @RequestParam(name="registrationCode") String registrationCode) throws BadPaddingException, InvalidKeyException, NoSuchAlgorithmException, IllegalBlockSizeException, NoSuchPaddingException, InvalidAlgorithmParameterException {
         char[] registrationCodeArray = registrationCode.toCharArray();
+
+        // The implementation of GuardedString here is almost useless because the registrationCode already hit the
+        // Heap in plaintext. However, this code is a POC to demonstration a safe encryption implementation.
+        // In the actual implementation the registrationCode will come as a response to an HTTP request and will be
+        // handled directly and cleared from memory as soon as possible.
         GuardedString guardedRegistrationCode = new GuardedString(registrationCodeArray);
 
         // Cleanup

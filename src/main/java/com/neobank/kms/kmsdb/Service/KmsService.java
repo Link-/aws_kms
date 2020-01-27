@@ -2,7 +2,6 @@ package com.neobank.kms.kmsdb.Service;
 
 import com.neobank.kms.kmsdb.Model.User;
 import com.neobank.kms.kmsdb.Repository.UserRepository;
-import javassist.bytecode.ByteArray;
 import org.identityconnectors.common.security.GuardedString;
 import org.identityconnectors.common.security.SecurityUtil;
 import org.springframework.data.util.Pair;
@@ -17,10 +16,8 @@ import software.amazon.awssdk.services.kms.model.DecryptResponse;
 import software.amazon.awssdk.services.kms.model.EncryptRequest;
 import software.amazon.awssdk.services.kms.model.EncryptResponse;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.*;
-import java.util.Arrays;
 import java.util.Base64;
 import java.nio.ByteBuffer;
 import javax.crypto.*;
@@ -155,22 +152,14 @@ public class KmsService {
      * @throws InvalidKeyException
      */
     private Pair<String, String> encryptRegistrationCode(GuardedString registrationCode) throws NoSuchPaddingException, NoSuchAlgorithmException, BadPaddingException, IllegalBlockSizeException, InvalidAlgorithmParameterException, InvalidKeyException {
+        // Generate an IV and a Key
         byte[] IV = getNextIv();
         SecretKey secretKey = getNextKey();
 
-        // Get the content from the GuardedString
-        byte[] registrationCodeArray = null;
-
         // Read the content of the registrationCode (we do this because it's a GuardedString)
-        final ByteArrayOutputStream byteArrayStream = new ByteArrayOutputStream();
-        registrationCode.access((final char[] clearChars) -> {
-            try {
-                byteArrayStream.write(SecurityUtil.charsToBytes(clearChars));
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        });
-        registrationCodeArray = byteArrayStream.toByteArray();
+        final StringBuilder clearRegistrationCode = new StringBuilder();
+        registrationCode.access(clearRegistrationCode::append);
+        byte[] registrationCodeArray = String.valueOf(clearRegistrationCode).getBytes();
 
         // Initialize the cipher and encrypt the registrationCode
         final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
@@ -190,7 +179,7 @@ public class KmsService {
 
         // Cleanup
         SecurityUtil.clear(IV);
-        byteArrayStream.reset();
+        clearRegistrationCode.setLength(0);
         SecurityUtil.clear(registrationCodeArray);
 
         // Encrypt the secret key with the CMK stored in KMS and return the result
@@ -236,6 +225,7 @@ public class KmsService {
         byte[] cipherText = new byte[byteBuffer.remaining()];
         byteBuffer.get(cipherText);
 
+        // Decrypt
         final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.DECRYPT_MODE,
                 new SecretKeySpec(decryptedSecretKey, "AES"),
@@ -246,7 +236,7 @@ public class KmsService {
         SecurityUtil.clear(IV);
         SecurityUtil.clear(decryptedSecretKey);
 
-        return new String(registrationCode);
+        return new String(registrationCode, StandardCharsets.UTF_8);
     }
 
     /**
